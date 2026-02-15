@@ -20,6 +20,7 @@ func isUppercaseStart(msg string) bool {
 	return unicode.IsUpper(r)
 }
 
+
 // hasNonEnglish returns true if the message contains non-ASCII letters.
 func hasNonEnglish(msg string) bool {
 	for _, r := range msg {
@@ -41,10 +42,11 @@ func hasSpecialChars(msg string) bool {
 	return false
 }
 
-// containsSensitiveKeyword returns true if any literal contains a sensitive keyword.
-func containsSensitiveKeyword(literals []string, keywords []string) bool {
-	for _, lit := range literals {
-		lower := strings.ToLower(lit)
+
+// containsSensitiveKeyword returns true if any of the values contains a sensitive keyword.
+func containsSensitiveKeyword(values []string, keywords []string) bool {
+	for _, val := range values {
+		lower := strings.ToLower(val)
 		for _, keyword := range keywords {
 			if strings.Contains(lower, keyword) {
 				return true
@@ -54,27 +56,18 @@ func containsSensitiveKeyword(literals []string, keywords []string) bool {
 	return false
 }
 
-func checkLowercaseStart(pass *analysis.Pass, expr ast.Expr, msg string) {
-	if isUppercaseStart(msg) {
-		pass.Reportf(expr.Pos(), "log message should start with a lowercase letter")
+// litValues extracts string values from BasicLit nodes.
+func litValues(lits []*ast.BasicLit) []string {
+	result := make([]string, 0, len(lits))
+	for _, lit := range lits {
+		val, err := strconv.Unquote(lit.Value)
+		if err == nil {
+			result = append(result, val)
+		}
 	}
+	return result
 }
 
-func checkEnglishOnly(pass *analysis.Pass, expr ast.Expr, msg string) bool {
-	if hasNonEnglish(msg) {
-		pass.Reportf(expr.Pos(), "log message should be in English only")
-		return true
-	}
-	return false
-}
-
-func checkNoSpecialChars(pass *analysis.Pass, expr ast.Expr, msg string) bool {
-	if hasSpecialChars(msg) {
-		pass.Reportf(expr.Pos(), "log message should not contain special characters or emoji")
-		return true
-	}
-	return false
-}
 
 func checkSensitiveData(pass *analysis.Pass, expr ast.Expr, keywords []string) {
 	binExpr, ok := expr.(*ast.BinaryExpr)
@@ -86,7 +79,8 @@ func checkSensitiveData(pass *analysis.Pass, expr ast.Expr, keywords []string) {
 		return
 	}
 
-	if containsSensitiveKeyword(collectStringLiterals(expr), keywords) {
+	lits := collectLits(expr)
+	if containsSensitiveKeyword(litValues(lits), keywords) {
 		pass.Reportf(expr.Pos(), "log message should not contain sensitive data")
 	}
 }
@@ -104,22 +98,56 @@ func hasNonLiteralParts(expr ast.Expr) bool {
 	return true
 }
 
-// create slice of all string literals
-func collectStringLiterals(expr ast.Expr) []string {
-	var result []string
-	switch e := expr.(type) {
-	case *ast.BasicLit:
-		if e.Kind == token.STRING {
-			val, err := strconv.Unquote(e.Value)
-			if err == nil {
-				result = append(result, val)
+// collectLits returns all string BasicLit nodes from the expression tree.
+func collectLits(expr ast.Expr) []*ast.BasicLit {
+	var lits []*ast.BasicLit
+	var walk func(ast.Expr)
+	walk = func(e ast.Expr) {
+		switch node := e.(type) {
+		case *ast.BasicLit:
+			if node.Kind == token.STRING {
+				lits = append(lits, node)
+			}
+		case *ast.BinaryExpr:
+			if node.Op == token.ADD {
+				walk(node.X)
+				walk(node.Y)
 			}
 		}
-	case *ast.BinaryExpr:
-		if e.Op == token.ADD {
-			result = append(result, collectStringLiterals(e.X)...)
-			result = append(result, collectStringLiterals(e.Y)...)
+	}
+	walk(expr)
+	return lits
+}
+
+
+// toLowercaseStart returns the message with the first letter lowercased.
+func toLowercaseStart(msg string) string {
+	if len(msg) == 0 {
+		return msg
+	}
+	r, size := utf8.DecodeRuneInString(msg)
+	return string(unicode.ToLower(r)) + msg[size:]
+}
+
+// stripSpecialChars removes all characters that are not letters, digits or spaces.
+func stripSpecialChars(msg string) string {
+	var b strings.Builder
+	for _, r := range msg {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' {
+			b.WriteRune(r)
 		}
 	}
-	return result
+	return b.String()
+}
+
+// suggestedFix creates a SuggestedFix that replaces a BasicLit with newText.
+func suggestedFix(message string, lit *ast.BasicLit, newText string) []analysis.SuggestedFix {
+	return []analysis.SuggestedFix{{
+		Message: message,
+		TextEdits: []analysis.TextEdit{{
+			Pos:     lit.Pos(),
+			End:     lit.End(),
+			NewText: []byte(strconv.Quote(newText)),
+		}},
+	}}
 }

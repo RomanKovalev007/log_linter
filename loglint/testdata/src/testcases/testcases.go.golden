@@ -1,0 +1,88 @@
+package a
+
+import (
+	"context"
+	"log/slog"
+
+	"go.uber.org/zap"
+)
+
+func slogTests() {
+	// rule 1: log message should start with a lowercase letter
+	slog.Info("starting server on port 8080")   // want `log message should start with a lowercase letter`
+	slog.Error("failed to connect to database") // want `log message should start with a lowercase letter`
+	slog.Info("starting server on port 8080")
+	slog.Error("failed to connect to database")
+	slog.Info("5 items processed")
+	slog.Info("server Not allowed")
+	slog.Info("server " + "Not allowed")
+
+	// rule 2: log message should be in English only
+	slog.Info("запуск сервера")                    // want `log message should be in English only`
+	slog.Error("ошибка подключения к базе данных") // want `log message should be in English only`
+	slog.Info("starting " + "сервер") // want `log message should be in English only`
+	slog.Info("starting server")
+	slog.Error("failed to connect to database")
+	slog.Info("starting" + " server")
+
+	// rule 3: log message should not contain special characters or emoji
+	slog.Info("server started")                // want `log message should not contain special characters or emoji`
+	slog.Error("connection failed")            // want `log message should not contain special characters or emoji`
+	slog.Warn("warning something went wrong") // want `log message should not contain special characters or emoji`
+	slog.Info("server" + " started") // want `log message should not contain special characters or emoji`
+	slog.Info("server started")
+	slog.Error("connection failed")
+	slog.Warn("something went wrong")
+
+	// rule 4: log message should not contain sensitive data
+	password := "secret123"
+	apiKey := "key123"
+	token := "tok123"
+	slog.Info("user password " + password) // want `log message should not contain sensitive data`
+	slog.Debug("apikey " + apiKey)         // want `log message should not contain sensitive data`
+	slog.Info("token " + token)            // want `log message should not contain sensitive data`
+	slog.Info("user authenticated successfully")
+	slog.Debug("api request completed")
+	slog.Info("token validated")
+
+	// multiple rules violated on one line
+	slog.Info("запуск") // want `log message should start with a lowercase letter` `log message should be in English only` `log message should not contain special characters or emoji`
+
+	// check slog msg index
+	slog.ErrorContext(context.Background(), "failed to connect to database")         // want `log message should start with a lowercase letter`
+	slog.Log(context.Background(), slog.LevelError, "failed to connect to database") // want `log message should start with a lowercase letter`
+
+	// empty message — no violations
+	slog.Info("")
+}
+
+func zapTests(logger *zap.Logger, sugar *zap.SugaredLogger) {
+	// rule 1: log message should start with a lowercase letter
+	logger.Info("starting server")  // want `log message should start with a lowercase letter`
+	logger.Error("error occurred")  // want `log message should start with a lowercase letter`
+	logger.Debug("debug info here") // want `log message should start with a lowercase letter`
+	logger.Info("starting server")
+
+	// rule 2: log message should be in English only
+	logger.Info("запуск сервера") // want `log message should be in English only`
+	logger.Info("starting server")
+
+	// rule 3: log message should not contain special characters or emoji
+	logger.Info("server started") // want `log message should not contain special characters or emoji`
+	logger.Warn("check this out") // want `log message should not contain special characters or emoji`
+	logger.Info("server started")
+
+	// rule 4: log message should not contain sensitive data
+	password := "secret123"
+	logger.Info("password " + password) // want `log message should not contain sensitive data`
+	logger.Info("user authenticated")
+
+	// SugaredLogger tests
+	sugar.Infow("starting server") // want `log message should start with a lowercase letter`
+	sugar.Warnw("warning message") // want `log message should start with a lowercase letter`
+	sugar.Errorw("error occurred") // want `log message should start with a lowercase letter`
+	sugar.Debugw("запуск")         // want `log message should be in English only`
+	sugar.Infow("done")            // want `log message should not contain special characters or emoji`
+	sugar.Infow("starting server")
+	sugar.Warnw("something happened")
+}

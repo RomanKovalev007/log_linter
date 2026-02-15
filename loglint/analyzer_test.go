@@ -11,3 +11,8 @@ func TestAnalyzer(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, loglint.Analyzer, "testcases")
 }
+
+func TestAnalyzerFixes(t *testing.T) {
+	testdata := analysistest.TestData()
+	analysistest.RunWithSuggestedFixes(t, testdata, loglint.Analyzer, "testcases")
+}

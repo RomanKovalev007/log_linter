@@ -3,6 +3,7 @@ package loglint
 import (
 	"flag"
 	"go/ast"
+	"go/token"
 	"go/types"
 
 	"golang.org/x/tools/go/analysis"
@@ -53,8 +54,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		(*ast.CallExpr)(nil),
 	}
 
-	insp.Preorder(nodeFilter,
-		 func(n ast.Node) {
+	insp.Preorder(nodeFilter, func(n ast.Node) {
 		call := n.(*ast.CallExpr)
 
 		selector, ok := call.Fun.(*ast.SelectorExpr)
@@ -102,26 +102,56 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 
 		msgArg := call.Args[msgIndex]
+		lits := collectLits(msgArg)
+		values := litValues(lits)
 
-		allLiterals := collectStringLiterals(msgArg)
-
-		if cfg.isLowercaseEnabled() && len(allLiterals) > 0 && allLiterals[0] != "" {
-			checkLowercaseStart(pass, msgArg, allLiterals[0])
+		if cfg.isLowercaseEnabled() && len(values) > 0 && values[0] != "" {
+			if isUppercaseStart(values[0]) {
+				d := analysis.Diagnostic{
+					Pos:     msgArg.Pos(),
+					Message: "log message should start with a lowercase letter",
+				}
+				if lit, ok := msgArg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+					fixed := toLowercaseStart(values[0])
+					if cfg.isNoSpecialEnabled() && hasSpecialChars(fixed) {
+						fixed = stripSpecialChars(fixed)
+					}
+					d.SuggestedFixes = suggestedFix("fix log message", lit, fixed)
+				}
+				pass.Report(d)
+			}
 		}
 
 		if cfg.isEnglishOnlyEnabled() {
-			for _, lit := range allLiterals {
-				if checkEnglishOnly(pass, msgArg, lit) {
+			for _, val := range values {
+				if hasNonEnglish(val) {
+					pass.Reportf(msgArg.Pos(), "log message should be in English only")
 					break
 				}
 			}
 		}
 
 		if cfg.isNoSpecialEnabled() {
-			for _, lit := range allLiterals {
-				if checkNoSpecialChars(pass, msgArg, lit) {
-					break
+			for i, val := range values {
+				if !hasSpecialChars(val) {
+					continue
 				}
+
+				d := analysis.Diagnostic{
+					Pos:     msgArg.Pos(),
+					Message: "log message should not contain special characters or emoji",
+				}
+
+				needsFix := true
+				if i == 0 && cfg.isLowercaseEnabled() && len(values) > 0 && isUppercaseStart(values[0]) {
+					needsFix = false
+				}
+
+				if needsFix && i < len(lits) {
+					d.SuggestedFixes = suggestedFix("remove special characters", lits[i], stripSpecialChars(val))
+				}
+				pass.Report(d)
+				break
 			}
 		}
 
@@ -132,3 +162,4 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 	return nil, nil
 }
+

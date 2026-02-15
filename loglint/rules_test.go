@@ -39,6 +39,54 @@ func TestIsUppercaseStart(t *testing.T) {
 	}
 }
 
+func TestToLowercaseStart(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want string
+	}{
+		{"ascii", "Starting server", "starting server"},
+		{"cyrillic", "Запуск", "запуск"},
+		{"already lowercase", "starting", "starting"},
+		{"empty", "", ""},
+		{"single char", "A", "a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toLowercaseStart(tt.msg)
+			if got != tt.want {
+				t.Errorf("toLowercaseStart(%q) = %q, want %q", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripSpecialChars(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want string
+	}{
+		{"exclamation", "server started!", "server started"},
+		{"multiple", "connection failed!!!", "connection failed"},
+		{"colon", "warning: something went wrong", "warning something went wrong"},
+		{"ellipsis", "loading...", "loading"},
+		{"emoji", "done \U0001F680", "done "},
+		{"clean", "server started", "server started"},
+		{"empty", "", ""},
+		{"only special", "!!!", ""},
+		{"mixed", "hello-world_test.go", "helloworldtestgo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripSpecialChars(tt.msg)
+			if got != tt.want {
+				t.Errorf("stripSpecialChars(%q) = %q, want %q", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHasNonEnglish(t *testing.T) {
 	tests := []struct {
 		name string
@@ -121,24 +169,36 @@ func TestContainsSensitiveKeyword(t *testing.T) {
 	}
 }
 
-func TestCollectStringLiterals(t *testing.T) {
+func TestCollectLits(t *testing.T) {
 	tests := []struct {
-		name string
-		src  string
-		want int
+		name       string
+		src        string
+		wantCount  int
+		wantValues []string
 	}{
-		{"single literal", `"hello"`, 1},
-		{"concat two literals", `"hello" + "world"`, 2},
-		{"concat with ident", `"hello" + x`, 1},
-		{"identifier only", `x`, 0},
-		{"triple concat", `"a" + x + "b"`, 2},
+		{"single literal", `"hello"`, 1, []string{"hello"}},
+		{"concat two literals", `"hello" + "world"`, 2, []string{"hello", "world"}},
+		{"concat with ident", `"hello" + x`, 1, []string{"hello"}},
+		{"identifier only", `x`, 0, nil},
+		{"triple concat", `"a" + x + "b"`, 2, []string{"a", "b"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			expr := mustParseExpr(t, tt.src)
-			got := collectStringLiterals(expr)
-			if len(got) != tt.want {
-				t.Errorf("collectStringLiterals(%q) returned %d literals, want %d", tt.src, len(got), tt.want)
+			lits := collectLits(expr)
+			if len(lits) != tt.wantCount {
+				t.Errorf("collectLits(%q) returned %d literals, want %d", tt.src, len(lits), tt.wantCount)
+			}
+			if tt.wantValues != nil {
+				values := litValues(lits)
+				if len(values) != len(tt.wantValues) {
+					t.Errorf("litValues returned %d values, want %d", len(values), len(tt.wantValues))
+				}
+				for i, v := range values {
+					if i < len(tt.wantValues) && v != tt.wantValues[i] {
+						t.Errorf("litValues[%d] = %q, want %q", i, v, tt.wantValues[i])
+					}
+				}
 			}
 		})
 	}
