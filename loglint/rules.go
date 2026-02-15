@@ -11,16 +11,6 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-var sensitiveKeywords = []string{
-	"password", "pwd",
-	"secret", "token",
-	"api_key", "apikey",
-	"private_key", "privatekey",
-	"access_key", "accesskey",
-	"credential", "bearer",
-	"session_id",
-}
-
 // isUppercaseStart returns true if the message starts with an uppercase letter.
 func isUppercaseStart(msg string) bool {
 	if len(msg) == 0 {
@@ -52,10 +42,10 @@ func hasSpecialChars(msg string) bool {
 }
 
 // containsSensitiveKeyword returns true if any literal contains a sensitive keyword.
-func containsSensitiveKeyword(literals []string) bool {
+func containsSensitiveKeyword(literals []string, keywords []string) bool {
 	for _, lit := range literals {
 		lower := strings.ToLower(lit)
-		for _, keyword := range sensitiveKeywords {
+		for _, keyword := range keywords {
 			if strings.Contains(lower, keyword) {
 				return true
 			}
@@ -86,7 +76,7 @@ func checkNoSpecialChars(pass *analysis.Pass, expr ast.Expr, msg string) bool {
 	return false
 }
 
-func checkSensitiveData(pass *analysis.Pass, expr ast.Expr) {
+func checkSensitiveData(pass *analysis.Pass, expr ast.Expr, keywords []string) {
 	binExpr, ok := expr.(*ast.BinaryExpr)
 	if !ok || binExpr.Op != token.ADD {
 		return
@@ -96,7 +86,7 @@ func checkSensitiveData(pass *analysis.Pass, expr ast.Expr) {
 		return
 	}
 
-	if containsSensitiveKeyword(collectStringLiterals(expr)) {
+	if containsSensitiveKeyword(collectStringLiterals(expr), keywords) {
 		pass.Reportf(expr.Pos(), "log message should not contain sensitive data")
 	}
 }

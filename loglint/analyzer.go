@@ -1,6 +1,7 @@
 package loglint
 
 import (
+	"flag"
 	"go/ast"
 	"go/types"
 
@@ -33,83 +34,101 @@ var Analyzer = &analysis.Analyzer{
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 }
 
+var configPath string
+
+func init() {
+	Analyzer.Flags = flag.FlagSet{}
+	Analyzer.Flags.StringVar(&configPath, "config", "", "path to .loglint.yml config file")
+}
 
 func run(pass *analysis.Pass) (interface{}, error) {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	nodeFilter := []ast.Node{
 		(*ast.CallExpr)(nil),
 	}
 
-	insp.Preorder(nodeFilter, 
-		func(n ast.Node) {
-			call := n.(*ast.CallExpr)
+	insp.Preorder(nodeFilter,
+		 func(n ast.Node) {
+		call := n.(*ast.CallExpr)
 
-			selector, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return
+		}
+
+		obj := pass.TypesInfo.Uses[selector.Sel]
+		if obj == nil {
+			return
+		}
+
+		fn, ok := obj.(*types.Func)
+		if !ok {
+			return
+		}
+
+		pkg := fn.Pkg()
+		if pkg == nil {
+			return
+		}
+
+		pkgPath := pkg.Path()
+		methodName := fn.Name()
+		var msgIndex int
+
+		switch pkgPath {
+		case "log/slog":
+			idx, found := slogMethods[methodName]
+			if !found {
 				return
 			}
-
-			obj := pass.TypesInfo.Uses[selector.Sel]
-			if obj == nil {
+			msgIndex = idx
+		case "go.uber.org/zap":
+			if !zapMethods[methodName] {
 				return
 			}
+			msgIndex = 0
+		default:
+			return
+		}
 
-			fn, ok := obj.(*types.Func)
-			if !ok {
-				return
-			}
+		if msgIndex >= len(call.Args) {
+			return
+		}
 
-			pkg := fn.Pkg()
-			if pkg == nil {
-				return
-			}
+		msgArg := call.Args[msgIndex]
 
-			pkgPath := pkg.Path()
-			methodName := fn.Name()
-			var msgIndex int
+		allLiterals := collectStringLiterals(msgArg)
 
-			switch pkgPath {
-			case "log/slog":
-				idx, found := slogMethods[methodName]
-				if !found {
-					return
-				}
-				msgIndex = idx
-			case "go.uber.org/zap":
-				if !zapMethods[methodName] {
-					return
-				}
-				msgIndex = 0
-			default:
-				return
-			}
+		if cfg.isLowercaseEnabled() && len(allLiterals) > 0 && allLiterals[0] != "" {
+			checkLowercaseStart(pass, msgArg, allLiterals[0])
+		}
 
-			if msgIndex >= len(call.Args) {
-				return
-			}
-
-			msgArg := call.Args[msgIndex]
-
-			allLiterals := collectStringLiterals(msgArg)
-
-			if len(allLiterals) > 0 && allLiterals[0] != "" {
-				checkLowercaseStart(pass, msgArg, allLiterals[0])
-			}
-
+		if cfg.isEnglishOnlyEnabled() {
 			for _, lit := range allLiterals {
 				if checkEnglishOnly(pass, msgArg, lit) {
 					break
 				}
 			}
+		}
+
+		if cfg.isNoSpecialEnabled() {
 			for _, lit := range allLiterals {
 				if checkNoSpecialChars(pass, msgArg, lit) {
 					break
 				}
 			}
+		}
 
-			checkSensitiveData(pass, msgArg)
-		})
+		if cfg.isSensitiveDataEnabled() {
+			checkSensitiveData(pass, msgArg, cfg.sensitiveKeywords())
+		}
+	})
 
 	return nil, nil
 }

@@ -113,7 +113,7 @@ func TestContainsSensitiveKeyword(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := containsSensitiveKeyword(tt.literals)
+			got := containsSensitiveKeyword(tt.literals, defaultSensitiveKeywords)
 			if got != tt.want {
 				t.Errorf("containsSensitiveKeyword(%v) = %v, want %v", tt.literals, got, tt.want)
 			}
